@@ -1,6 +1,8 @@
 const express = require('express');
 const db = require('./config/db');
 const productRouter = require('./routes/productRoute');
+const saleRouter = require('./routes/saleRoute');
+const returnRouter = require('./routes/returnRoute');
 const healthRouter = require('./routes/healthRoute');
 
 const cors = require('cors');
@@ -18,6 +20,8 @@ app.use(express.urlencoded({extended : true}));
 
 app.use('/', healthRouter); // exposes /healthz and /readyz
 app.use('/api/products', productRouter);
+app.use('/api/sales', saleRouter);
+app.use('/api/returns', returnRouter);
 
 // Not found and error handlers (JSON responses)
 const { notFoundMiddleware, errorMiddleware } = require('./utils/http');
