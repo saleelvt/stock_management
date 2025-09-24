@@ -21,42 +21,44 @@ const createSale = async (req, res) => {
   const normalized = items.map(normalizeItem).filter(Boolean);
   if (normalized.length !== items.length) return fail(res, 400, 'Invalid item entries');
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const successfulDecrements = [];
   try {
     const saleItems = [];
     for (const it of normalized) {
-      const product = await Product.findOne({ productCode: it.productCode }).session(session);
-      if (!product) throw new Error(`Product not found: ${it.productCode}`);
-
-      const sizeEntry = product.stockBySize.find(s => String(s.size).trim() === it.size);
-      if (!sizeEntry || sizeEntry.quantity < it.quantity) {
-        throw new Error(`Insufficient stock for ${it.productCode} size ${it.size}`);
+      const updated = await Product.findOneAndUpdate(
+        {
+          productCode: it.productCode,
+          'stockBySize.size': it.size,
+          'stockBySize.quantity': { $gte: it.quantity }
+        },
+        { $inc: { 'stockBySize.$.quantity': -it.quantity } },
+        { new: true }
+      );
+      if (!updated) {
+        throw new Error(`Insufficient stock or product/size not found for ${it.productCode} size ${it.size}`);
       }
 
-      sizeEntry.quantity -= it.quantity;
-      await product.save({ session });
-
+      successfulDecrements.push({ productId: updated._id, size: it.size, quantity: it.quantity });
       saleItems.push({
-        product: product._id,
-        productCode: product.productCode,
+        product: updated._id,
+        productCode: updated.productCode,
         size: it.size,
         quantity: it.quantity,
-        color: it.color || product.color
+        color: it.color || updated.color
       });
     }
 
     const totalItems = saleItems.reduce((s, i) => s + i.quantity, 0);
-    const sale = await Sale.create([
-      { customerName, items: saleItems, notes: notes || '', totalItems }
-    ], { session });
-
-    await session.commitTransaction();
-    session.endSession();
-    return success(res, 201, sale[0]);
+    const sale = await Sale.create({ customerName, items: saleItems, notes: notes || '', totalItems });
+    return success(res, 201, sale);
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
+    // Roll back successful decrements
+    for (const d of successfulDecrements) {
+      await Product.updateOne(
+        { _id: d.productId, 'stockBySize.size': d.size },
+        { $inc: { 'stockBySize.$.quantity': d.quantity } }
+      );
+    }
     return fail(res, 400, 'Sale creation failed', err.message);
   }
 };
