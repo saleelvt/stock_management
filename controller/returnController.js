@@ -69,8 +69,30 @@ const listReturnsByCustomer = async (req, res) => {
 
 const listAllReturns = async (req, res) => {
   try {
-    const items = await Return.find({}).sort({ createdAt: -1 }).lean();
-    return success(res, 200, items, { total: items.length });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Get total count for pagination metadata
+    const total = await Return.countDocuments({});
+    
+    // Get paginated results
+    const items = await Return.find({})
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalPages = Math.ceil(total / limit);
+    
+    return success(res, 200, items, { 
+      total, 
+      page, 
+      limit, 
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1
+    });
   } catch (err) {
     return fail(res, 500, 'Failed to fetch returns', err.message);
   }
