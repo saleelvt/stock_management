@@ -67,6 +67,15 @@ const listReturnsByCustomer = async (req, res) => {
   }
 };
 
-module.exports = { createReturn, listReturnsByCustomer };
+const listAllReturns = async (req, res) => {
+  try {
+    const items = await Return.find({}).sort({ createdAt: -1 }).lean();
+    return success(res, 200, items, { total: items.length });
+  } catch (err) {
+    return fail(res, 500, 'Failed to fetch returns', err.message);
+  }
+};
+
+module.exports = { createReturn, listReturnsByCustomer, listAllReturns };
 
 
