@@ -25,17 +25,48 @@ const createSale = async (req, res) => {
   try {
     const saleItems = [];
     for (const it of normalized) {
+       
+      const product = await Product.findOne({
+        productCode: it.productCode
+      });
+      
+      if (!product) {
+        throw new Error(`Product ${it.productCode} not found`);
+      }
+      
+       
+      const sizeEntry = product.stockBySize.find(s => s.size === it.size);
+      if (!sizeEntry) {
+        throw new Error(`Size ${it.size} not found for product ${it.productCode}`);
+      }
+      
+      if (sizeEntry.quantity < it.quantity) {
+        throw new Error(`Insufficient stock for ${it.productCode} size ${it.size}. Available: ${sizeEntry.quantity}, Requested: ${it.quantity}`);
+      }
+      
+       
+      const updatedStockBySize = product.stockBySize.map(sizeStock => {
+        if (sizeStock.size === it.size) {
+          return {
+            size: sizeStock.size,
+            quantity: sizeStock.quantity - it.quantity
+          };
+        }
+        return {
+          size: sizeStock.size,
+          quantity: sizeStock.quantity
+        };
+      });
+      
+      
       const updated = await Product.findOneAndUpdate(
-        {
-          productCode: it.productCode,
-          'stockBySize.size': it.size,
-          'stockBySize.quantity': { $gte: it.quantity }
-        },
-        { $inc: { 'stockBySize.$.quantity': -it.quantity } },
+        { productCode: it.productCode },
+        { stockBySize: updatedStockBySize },
         { new: true }
       );
+      
       if (!updated) {
-        throw new Error(`Insufficient stock or product/size not found for ${it.productCode} size ${it.size}`);
+        throw new Error(`Failed to update stock for ${it.productCode} size ${it.size}`);
       }
 
       successfulDecrements.push({ productId: updated._id, size: it.size, quantity: it.quantity });
@@ -52,12 +83,28 @@ const createSale = async (req, res) => {
     const sale = await Sale.create({ customerName, items: saleItems, notes: notes || '', totalItems });
     return success(res, 201, sale);
   } catch (err) {
-    // Roll back successful decrements
+    
     for (const d of successfulDecrements) {
-      await Product.updateOne(
-        { _id: d.productId, 'stockBySize.size': d.size },
-        { $inc: { 'stockBySize.$.quantity': d.quantity } }
-      );
+      const product = await Product.findById(d.productId);
+      if (product) {
+        const updatedStockBySize = product.stockBySize.map(sizeStock => {
+          if (sizeStock.size === d.size) {
+            return {
+              size: sizeStock.size,
+              quantity: sizeStock.quantity + d.quantity
+            };
+          }
+          return {
+            size: sizeStock.size,
+            quantity: sizeStock.quantity
+          };
+        });
+        
+        await Product.updateOne(
+          { _id: d.productId },
+          { stockBySize: updatedStockBySize }
+        );
+      }
     }
     return fail(res, 400, 'Sale creation failed', err.message);
   }
